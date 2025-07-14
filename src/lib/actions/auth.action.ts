@@ -22,9 +22,9 @@ export async function signUp(params: SignUpParams){
             success: true,
             message: 'User created successfully.'
         };
-    } catch (e: any) {
+    } catch (e: unknown) {
         console.log(e);
-        if(e.code==='auth/email-already-exists'){
+        if(e && typeof e === 'object' && 'code' in e && e.code === 'auth/email-already-exists'){
             return{
                 success: false,
                 message: 'This email is already in use.'
@@ -51,19 +51,21 @@ export async function signIn(params: SignInParams) {
 
         await setSessionCookie(idToken);
         
-    } catch (error: any) {
+    } catch (error: unknown) {
         console.error(error);
-        if (error.code === 'auth/wrong-password') {
-            return {
-                success: false,
-                message: 'Incorrect password.',
-            };
-        }
-        if (error.code === 'auth/user-not-found') {
-            return {
-                success: false,
-                message: 'User not found.',
-            };
+        if (error && typeof error === 'object' && 'code' in error) {
+            if (error.code === 'auth/wrong-password') {
+                return {
+                    success: false,
+                    message: 'Incorrect password.',
+                };
+            }
+            if (error.code === 'auth/user-not-found') {
+                return {
+                    success: false,
+                    message: 'User not found.',
+                };
+            }
         }
         return {
             success: false,

@@ -28,7 +28,7 @@ export async function POST(request: Request) {
     let parsedQuestions;
     try {
       parsedQuestions = JSON.parse(questions);
-    } catch (e) {
+    } catch {
       return Response.json(
         { success: false, error: "AI response was not valid JSON." },
         { status: 500 }
