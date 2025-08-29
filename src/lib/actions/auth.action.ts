@@ -117,3 +117,61 @@ export async function isAuthenticated() {
     const user = await getCurrentUser();
     return !!user;
 }
+
+export async function signOutServer() {
+    try {
+        const cookieStore = await cookies();
+        
+        // Clear the session cookie
+        cookieStore.delete('session');
+        
+        return {
+            success: true,
+            message: 'Signed out successfully.'
+        };
+    } catch (error) {
+        console.error('Error during server sign out:', error);
+        return {
+            success: false,
+            message: 'Failed to sign out.'
+        };
+    }
+}
+
+export async function getInterviewsByUserId(userId: string): Promise<Interview[]> {
+    if (!userId) {
+        return [];
+    }
+    
+    const interviews = await db
+        .collection('interviews')
+        .where('userId', '==', userId)
+        .orderBy('createdAt', 'desc')
+        .get();
+
+    return interviews.docs.map((doc) => ({
+        id: doc.id,
+        ...doc.data()
+    })) as Interview[];
+}
+
+export async function getLatestInterviews(params: GetLatestInterviewsParams): Promise<Interview[]> {
+    const { userId, limit = 20 } = params;
+
+    if (!userId) {
+        return [];
+    }
+
+    const interviews = await db
+        .collection('interviews')
+        .orderBy('createdAt', 'desc')
+        .where('finalized', '==', true)
+        .where('userId', '!=', userId)
+        .limit(limit)
+        .get();
+
+    return interviews.docs.map((doc) => ({
+        id: doc.id,
+        ...doc.data()
+    })) as Interview[];
+}

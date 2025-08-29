@@ -1,264 +1,384 @@
 "use client";
+
 import Image from "next/image";
-import {cn} from "@/lib/utils";
-import { vapi } from "@/lib/vapi.sdk";
-import { vapiConnectionManager } from "@/lib/vapi-utils";
+import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
-import { useEffect, useState} from "react";
+
+import { cn } from "@/lib/utils";
+import { vapi } from "@/lib/vapi.sdk";
+import { interviewer } from "../../constants";
+import { createFeedback } from "@/lib/actions/general.action";
 
 enum CallStatus {
-    INACTIVE = 'INACTIVE',
-    CONNECTING = 'CONNECTING',
-    ACTIVE = 'ACTIVE',
-    FINISHED = 'FINISHED',
+  INACTIVE = "INACTIVE",
+  CONNECTING = "CONNECTING",
+  ACTIVE = "ACTIVE",
+  FINISHED = "FINISHED",
 }
 
 interface SavedMessage {
-    role: 'user' | 'system' | 'assistant';
-    content: string;
+  role: "user" | "system" | "assistant";
+  content: string;
 }
 
-const Agent = ({ userName, userId }: Omit<AgentProps, 'type'>) => {
-    const router = useRouter();
-    const [isSpeaking, setIsSpeaking] = useState(false);
-    const [callStatus, setCallStatus] = useState<CallStatus>(CallStatus.INACTIVE);
-    const [messages, setMessages] = useState<SavedMessage[]>([]);
-    const [callEndReason, setCallEndReason] = useState<string>('');
+interface VapiError {
+  type?: string;
+  error?: {
+    status?: number;
+  };
+  message?: string;
+  code?: string;
+}
 
-useEffect(() => {
-        const onCallStart = () => setCallStatus(CallStatus.ACTIVE);
-        const onCallEnd = (reason?: unknown) => {
-            console.log('Call ended', reason ? `with reason: ${JSON.stringify(reason)}` : '');
+const Agent = ({
+  userName,
+  userId,
+  interviewId,
+  feedbackId,
+  type,
+  questions,
+}: AgentProps) => {
+  const router = useRouter();
+  const [callStatus, setCallStatus] = useState<CallStatus>(CallStatus.INACTIVE);
+  const [messages, setMessages] = useState<SavedMessage[]>([]);
+  const [isSpeaking, setIsSpeaking] = useState(false);
+  const [lastMessage, setLastMessage] = useState<string>("");
+  const [error, setError] = useState<string | null>(null);
 
-            // Always set status to finished regardless of reason
-            setCallStatus(CallStatus.FINISHED);
-
-            // If there's a reason that includes ejection, log it but don't treat as error
-            if (reason) {
-                const reasonStr = typeof reason === 'string' ? reason : JSON.stringify(reason);
-                if (reasonStr.includes('ejection') || reasonStr.includes('Meeting has ended')) {
-                    console.log('Call ended normally with ejection reason - this is expected behavior');
-                    setCallEndReason('The interview has ended. Thank you for participating!');
-                } else {
-                    setCallEndReason(reasonStr);
-                }
-            } else {
-                setCallEndReason('The interview has ended. Thank you for participating!');
-            }
-        };
-
-        const onMessage = (message: unknown) => {
-            console.log('Received message:', message);
-
-            // Handle meeting ejection messages
-            if (message && typeof message === 'object' && 'type' in message) {
-                if (message.type === 'error' && 'error' in message) {
-                    const errorMsg = message.error as string;
-                    if (errorMsg.includes('ejection') || errorMsg.includes('Meeting has ended')) {
-                        console.log('Meeting ejection message received - ending call gracefully');
-                        setCallStatus(CallStatus.FINISHED);
-                        setCallEndReason('The interview has ended. Thank you for participating!');
-                        return;
-                    }
-                }
-
-                // Handle call-end messages
-                if (message.type === 'call-end') {
-                    console.log('Call-end message received');
-                    setCallStatus(CallStatus.FINISHED);
-                    setCallEndReason('The interview has ended. Thank you for participating!');
-                    return;
-                }
-
-                // Handle transcript messages
-                if (message.type === 'transcript' && 'transcriptType' in message &&
-                   message.transcriptType === 'final' && 'role' in message && 'transcript' in message) {
-                    const newMessage = {
-                        role: message.role as 'user' | 'system' | 'assistant',
-                        content: message.transcript as string
-                    }
-
-                    setMessages((prev) => [...prev, newMessage]);
-                }
-            }
-        }
-
-        const onSpeechStart = () => setIsSpeaking(true);
-        const onSpeechEnd = () => setIsSpeaking(false);
-
-        const onError = (error: unknown) => {
-            console.log('VAPI Error received:', error);
-
-            // Handle the case where error might be undefined or not a proper Error object
-            if (!error) {
-                console.log('Received undefined error, likely call ended normally');
-                setCallStatus(CallStatus.FINISHED);
-                return;
-            }
-
-            // Convert error to string for checking
-            const errorString = typeof error === 'string' ? error :
-                               (error instanceof Error ? error.message : null) ||
-                               (error && typeof error === 'object' && 'message' in error ? (error as { message: string }).message : null) ||
-                               JSON.stringify(error) ||
-                               String(error);
-
-            console.log('Error string:', errorString);
-
-            // Handle specific ejection errors
-            if (errorString.includes('ejection') ||
-                errorString.includes('Meeting has ended') ||
-                errorString.includes('Meeting ended due to ejection')) {
-                console.log('Meeting ejection detected - ending call gracefully');
-                setCallStatus(CallStatus.FINISHED);
-                setCallEndReason('The interview has ended. Thank you for participating!');
-                return;
-            }
-
-            // Handle other errors
-            console.error('Unexpected VAPI error:', errorString);
-        };
-
-        vapi.on('call-start', onCallStart);
-        vapi.on('call-end', onCallEnd);
-        vapi.on('message', onMessage);
-        vapi.on('speech-start', onSpeechStart);
-        vapi.on('speech-end', onSpeechEnd);
-        vapi.on('error', onError);
-
-        return () => {
-            vapi.off('call-start', onCallStart);
-            vapi.off('call-end', onCallEnd);
-            vapi.off('message', onMessage);
-            vapi.off('speech-start', onSpeechStart);
-            vapi.off('speech-end', onSpeechEnd);
-            vapi.off('error', onError)
-        }
-    }, [])
-
-    useEffect(() => {
-        // Add a delay before redirecting to allow user to see what happened
-        if(callStatus === CallStatus.FINISHED) {
-            console.log('Call finished, redirecting to home in 3 seconds...');
-            const timer = setTimeout(() => {
-                console.log('Redirecting to home page');
-                router.push('/');
-            }, 3000); // 3 second delay to give user time to understand what happened
-
-            return () => clearTimeout(timer);
-        }
-    }, [callStatus, router]);
-
-    const handleCall = async () => {
-        try {
-            console.log('Starting call with:', { userName, userId, workflowId: process.env.NEXT_PUBLIC_VAPI_WORKFLOW_ID });
-            setCallStatus(CallStatus.CONNECTING);
-
-            // Start the VAPI call
-            await vapiConnectionManager.startCall({
-                userName: userName || 'User',
-                userId: userId || 'anonymous'
-            });
-
-            console.log('Call start request sent successfully');
-        } catch (error) {
-            console.error('Error starting call:', error);
-
-            // Convert error to string for checking
-            const errorString = typeof error === 'string' ? error :
-                               (error instanceof Error ? error.message : null) ||
-                               (error && typeof error === 'object' && 'message' in error ? (error as { message: string }).message : null) ||
-                               JSON.stringify(error) ||
-                               String(error);
-
-            // Handle ejection errors
-            if (errorString.includes('ejection') || errorString.includes('Meeting has ended')) {
-                console.log('Meeting ejection during call start - ending gracefully');
-                setCallStatus(CallStatus.FINISHED);
-                setCallEndReason('The interview has ended. Thank you for participating!');
-                return;
-            }
-
-            // Handle permission errors
-            if (errorString.includes('permission') || errorString.includes('microphone')) {
-                alert('Microphone access is required. Please check your browser permissions and try again.');
-                setCallStatus(CallStatus.INACTIVE);
-                return;
-            }
-
-            // Handle other errors
-            alert(`Failed to start call: ${errorString}`);
-            setCallStatus(CallStatus.INACTIVE);
-        }
+  useEffect(() => {
+    console.log('Agent initialized:', { type, userName, userId });
+    
+    // Debug environment variables for generate type
+    if (type === 'generate') {
+      console.log('Environment variables for generation:', {
+        hasPublicKey: !!process.env.NEXT_PUBLIC_VAPI_PUBLIC_KEY,
+        hasWorkflowId: !!process.env.NEXT_PUBLIC_VAPI_WORKFLOW_ID,
+        publicKeyPrefix: process.env.NEXT_PUBLIC_VAPI_PUBLIC_KEY?.substring(0, 8),
+        workflowIdPrefix: process.env.NEXT_PUBLIC_VAPI_WORKFLOW_ID?.substring(0, 8)
+      });
     }
 
-    const handleDisconnect = async () => {
-        try {
-            setCallStatus(CallStatus.FINISHED);
-            vapiConnectionManager.stopCall();
-        } catch (error) {
-            console.error('Error disconnecting call:', error);
-            setCallStatus(CallStatus.FINISHED);
+    const onCallStart = () => {
+      console.log('Call started');
+      setCallStatus(CallStatus.ACTIVE);
+      setError(null);
+    };
+
+    const onCallEnd = () => {
+      console.log('Call ended');
+      setCallStatus(CallStatus.FINISHED);
+    };
+
+    const onMessage = (...args: unknown[]) => {
+      const message = args[0] as Message;
+      if (message && message.type === "transcript" && message.transcriptType === "final") {
+        const newMessage = { 
+          role: message.role as "user" | "system" | "assistant", 
+          content: message.transcript 
+        };
+        setMessages((prev) => [...prev, newMessage]);
+      }
+    };
+
+    const onSpeechStart = () => setIsSpeaking(true);
+    const onSpeechEnd = () => setIsSpeaking(false);
+
+    const onError = (...args: unknown[]) => {
+      const error = args[0];
+      console.error("VAPI Error:", error);
+      
+      let errorMessage = 'Call failed. Please try again.';
+      
+      if (error && typeof error === 'object') {
+        const vapiError = error as VapiError;
+        
+        // Handle VAPI specific error types
+        if (vapiError.type === 'start-method-error') {
+          if (vapiError.error?.status === 400) {
+            errorMessage = 'Interview generation is currently unavailable. The workflow configuration may need to be updated.';
+          } else {
+            errorMessage = 'Failed to start interview generation. Please contact support.';
+          }
+        } else if (vapiError.message) {
+          errorMessage = vapiError.message;
+        } else if (vapiError.code) {
+          errorMessage = `Error ${vapiError.code}: ${vapiError.message || 'Unknown error'}`;
         }
+      } else if (error && typeof error === 'object' && 'message' in error) {
+        errorMessage = (error as Error).message;
+      } else if (typeof error === 'string') {
+        errorMessage = error;
+      }
+      
+      setError(errorMessage);
+      setCallStatus(CallStatus.INACTIVE);
+    };
+
+    // Add event listeners
+    vapi.on("call-start", onCallStart);
+    vapi.on("call-end", onCallEnd);
+    vapi.on("message", onMessage);
+    vapi.on("speech-start", onSpeechStart);
+    vapi.on("speech-end", onSpeechEnd);
+    vapi.on("error", onError);
+
+    return () => {
+      // Clean up event listeners
+      vapi.off("call-start", onCallStart);
+      vapi.off("call-end", onCallEnd);
+      vapi.off("message", onMessage);
+      vapi.off("speech-start", onSpeechStart);
+      vapi.off("speech-end", onSpeechEnd);
+      vapi.off("error", onError);
+    };
+  }, [userName, userId, interviewId, type, questions]);
+
+  useEffect(() => {
+    if (messages.length > 0) {
+      const lastMsg = messages[messages.length - 1].content;
+      setLastMessage(lastMsg);
     }
 
-    const latestMessage = messages[messages.length - 1]?.content;
+    const handleGenerateFeedback = async (messages: SavedMessage[]) => {
+      console.log("Starting feedback generation for", messages.length, "messages");
+      console.log("Message sample:", messages.slice(0, 2));
 
-    return (
-        <>
-        <div className="call-view">
-            <div className="card-interviewer">
-                <div className="avatar">
-                    <Image src="/ai-avatar.png" alt="vapi" width={65} height={54} className="object-cover" />
-                    {isSpeaking && <span className="animate-speak" />}
-                </div>
-                <h3>AI Interviewer</h3>
-            </div>
+      if (!interviewId || !userId) {
+        console.error('Missing required IDs for feedback generation:', { interviewId, userId });
+        router.push("/");
+        return;
+      }
 
-            <div className="card-border">
-                <div className="card-content">
-                    <Image src="/xENfQsk9_400x400.jpg" alt="user avatar" width={540} height={540} className="rounded-full object-cover size-[120px]" />
-                    <h3>{userName}</h3>
-                </div>
-            </div>
+      try {
+        console.log('Calling createFeedback with:', {
+          interviewId,
+          userId,
+          transcriptLength: messages.length,
+          feedbackId
+        });
+        
+        const { success, feedbackId: id } = await createFeedback({
+          interviewId,
+          userId,
+          transcript: messages,
+          feedbackId,
+        });
+
+        if (success && id) {
+          console.log('Feedback generated successfully with ID:', id);
+          router.push(`/interview/${interviewId}/feedback`);
+        } else {
+          console.error("Error saving feedback - success:", success, "id:", id);
+          setError('Failed to generate feedback');
+          setTimeout(() => router.push("/"), 2000);
+        }
+      } catch (error) {
+        console.error('Feedback generation error:', error);
+        setError('Failed to generate feedback');
+        setTimeout(() => router.push("/"), 2000);
+      }
+    };
+
+    if (callStatus === CallStatus.FINISHED) {
+      console.log('Call finished, processing results...');
+      if (type === "generate") {
+        // For generate type, just redirect to home after a brief delay
+        setTimeout(() => router.push("/"), 1000);
+      } else if (messages.length > 0) {
+        // For interview type, generate feedback
+        handleGenerateFeedback(messages);
+      } else {
+        console.log('No messages to process, redirecting home');
+        setTimeout(() => router.push("/"), 1000);
+      }
+    }
+  }, [messages, callStatus, feedbackId, interviewId, router, type, userId]);
+
+  const handleCall = async () => {
+    console.log('Starting call with type:', type);
+    
+    setCallStatus(CallStatus.CONNECTING);
+    setError(null);
+
+    try {
+      if (type === "generate") {
+        const workflowId = process.env.NEXT_PUBLIC_VAPI_WORKFLOW_ID;
+        const publicKey = process.env.NEXT_PUBLIC_VAPI_PUBLIC_KEY;
+        
+        if (!publicKey) {
+          throw new Error('VAPI Public Key not configured. Please add NEXT_PUBLIC_VAPI_PUBLIC_KEY to .env.local and restart the server.');
+        }
+        
+        if (!workflowId) {
+          throw new Error('VAPI Workflow ID not configured. Please add NEXT_PUBLIC_VAPI_WORKFLOW_ID to .env.local and restart the server.');
+        }
+        
+        console.log('Starting interview generation workflow:', {
+          workflowId: workflowId.substring(0, 8) + '...',
+          username: userName,
+          userid: userId || 'anonymous'
+        });
+        
+        await vapi.start(
+          undefined, // assistant
+          undefined, // assistantOverrides
+          undefined, // squad
+          workflowId, // workflow
+          { // workflowOverrides
+            variableValues: {
+              username: userName,
+              userid: userId || '',
+            },
+          }
+        );
+      } else {
+        let formattedQuestions = "";
+        if (questions && questions.length > 0) {
+          formattedQuestions = questions
+            .map((question) => `- ${question}`)
+            .join("\n");
+        } else {
+          formattedQuestions = "- Tell me about yourself\n- What are your strengths and weaknesses?\n- Why do you want this position?";
+        }
+
+        console.log('Starting interview call...');
+        await vapi.start(
+          interviewer, // assistant
+          { // assistantOverrides
+            variableValues: {
+              questions: formattedQuestions,
+            },
+          }
+        );
+      }
+    } catch (error) {
+      console.error('Error starting call:', error);
+      
+      let errorMessage = 'Failed to start call';
+      if (error instanceof Error) {
+        if (error.message.includes('VAPI_NOT_CONFIGURED')) {
+          errorMessage = 'VAPI not configured. Please check your environment variables and restart the server.';
+        } else if (error.message.includes('VAPI_INIT_FAILED')) {
+          errorMessage = 'VAPI initialization failed. Please check your API key.';
+        } else if (error.message.includes('VAPI_WORKFLOW_ERROR')) {
+          errorMessage = 'Interview generation is temporarily unavailable. The service is being updated.';
+        } else if (error.message.includes('VAPI_START_ERROR')) {
+          errorMessage = 'Unable to start interview generation. Please try again in a few moments.';
+        } else if (error.message.includes('VAPI_EMPTY_ERROR')) {
+          errorMessage = 'Interview generation service is currently unavailable. Please try again later.';
+        } else if (error.message.includes('Workflow ID not configured')) {
+          errorMessage = 'Interview generation is not configured. Please contact support.';
+        } else if (error.message.includes('Public Key not configured')) {
+          errorMessage = 'VAPI service is not configured. Please contact support.';
+        } else {
+          errorMessage = error.message || 'Unknown error occurred';
+        }
+      } else {
+        // Handle empty error objects
+        errorMessage = 'Unable to start interview generation. Please check your internet connection and try again.';
+      }
+      
+      setError(errorMessage);
+      setCallStatus(CallStatus.INACTIVE);
+    }
+  };
+
+  const handleDisconnect = () => {
+    console.log('Disconnecting call');
+    setCallStatus(CallStatus.FINISHED);
+    vapi.stop();
+  };
+
+  return (
+    <>
+      {error && (
+        <div className="mb-4 p-4 bg-red-100 border border-red-400 text-red-700 rounded">
+          <p className="font-semibold">Error:</p>
+          <p>{error}</p>
         </div>
-            {callStatus === CallStatus.FINISHED && callEndReason && (
-                <div className="transcript-border">
-                    <div className="transcript">
-                        <p className={cn('transition-opacity duration-500 opacity-0', 'animate-fadeIn opacity-100 text-center font-medium')}>
-                            {callEndReason}
-                        </p>
-                    </div>
-                </div>
-            )}
+      )}
+      
+      <div className="call-view">
+        {/* AI Interviewer Card */}
+        <div className="card-interviewer">
+          <div className="avatar">
+            <Image
+              src="/ai-avatar.png"
+              alt="profile-image"
+              width={65}
+              height={54}
+              className="object-cover"
+            />
+            {isSpeaking && <span className="animate-speak" />}
+          </div>
+          <h3>AI Interviewer</h3>
+        </div>
 
-            {messages.length > 0 && callStatus !== CallStatus.FINISHED && (
-                <div className="transcript-border">
-                    <div className="transcript">
-                        <p key={latestMessage} className={cn('transition-opacity duration-500 opacity-0', 'animate-fadeIn opacity-100')}>
-                            {latestMessage}
-                        </p>
-                    </div>
-                </div>
-            )}
+        {/* User Profile Card */}
+        <div className="card-border">
+          <div className="card-content">
+            <Image
+              src="/xENfQsk9_400x400.jpg"
+              alt="profile-image"
+              width={539}
+              height={539}
+              className="rounded-full object-cover size-[120px]"
+            />
+            <h3>{userName}</h3>
+          </div>
+        </div>
+      </div>
 
-            <div className="w-full flex justify-center">
-                {callStatus !== CallStatus.ACTIVE ? (
-                    <button className="relative btn-call" onClick={handleCall}>
-                        <span className={cn('absolute animate-ping rounded-full opacity-75', callStatus !== CallStatus.CONNECTING && 'hidden')}
-                             />
+      {messages.length > 0 && (
+        <div className="transcript-border">
+          <div className="transcript">
+            <p
+              key={lastMessage}
+              className={cn(
+                "transition-opacity duration-500 opacity-0",
+                "animate-fadeIn opacity-100"
+              )}
+            >
+              {lastMessage}
+            </p>
+          </div>
+        </div>
+      )}
 
-                            <span>
-                                {callStatus === CallStatus.INACTIVE || callStatus === CallStatus.FINISHED ? 'Call' : '. . . '}
-                            </span>
-                    </button>
-                ) : (
-                    <button className="btn-disconnect" onClick={handleDisconnect}>
-                        End
-                    </button>
-                )}
-            </div>
-        </>
-    )
-}
-export default Agent
+      <div className="w-full flex justify-center">
+        {callStatus !== "ACTIVE" ? (
+          <button 
+            className="relative btn-call" 
+            onClick={handleCall}
+            disabled={callStatus === CallStatus.CONNECTING}
+          >
+            <span
+              className={cn(
+                "absolute animate-ping rounded-full opacity-75",
+                callStatus !== "CONNECTING" && "hidden"
+              )}
+            />
+
+            <span className="relative">
+              {callStatus === "INACTIVE" || callStatus === "FINISHED"
+                ? "Call"
+                : ". . ."}
+            </span>
+          </button>
+        ) : (
+          <button className="btn-disconnect" onClick={handleDisconnect}>
+            End
+          </button>
+        )}
+      </div>
+
+      {callStatus === CallStatus.FINISHED && messages.length > 0 && (
+        <div className="mt-4 p-4 bg-green-100 border border-green-400 text-green-700 rounded">
+          <p>Interview completed! Processing feedback...</p>
+        </div>
+      )}
+    </>
+  );
+};
+
+export default Agent;

@@ -37,7 +37,8 @@ export class VapiConnectionManager {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       stream.getTracks().forEach(track => track.stop());
     } catch (error) {
-      throw new Error('Microphone access is required for the interview. Please allow microphone access and try again.');
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      throw new Error(`Microphone access is required for the interview. Error: ${errorMessage}. Please allow microphone access and try again.`);
     }
   }
 
