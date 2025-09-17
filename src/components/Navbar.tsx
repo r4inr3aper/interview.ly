@@ -2,7 +2,7 @@
 
 import Link from "next/link"
 import { Button } from "@/components/ui/button"
-import { Brain, Menu, X, User, LogOut, Settings } from "lucide-react"
+import { Menu, X, User, LogOut, Settings } from "lucide-react"
 import { useState, useEffect, useRef } from "react"
 import { onAuthStateChanged, signOut } from "firebase/auth"
 import { auth } from "@/firebase/client"
@@ -93,8 +93,7 @@ const Navbar = () => {
       <div className="container mx-auto px-4 sm:px-6 lg:px-8">
         <div className="flex justify-between items-center h-16">
           {/* Logo */}
-          <Link href="/" className="flex items-center space-x-2">
-            <Brain className="h-8 w-8 text-primary" />
+          <Link href="/" className="flex items-center">
             <span className="text-xl font-bold bg-gradient-to-r from-primary to-primary/70 bg-clip-text text-transparent">
               Interview.ly
             </span>
