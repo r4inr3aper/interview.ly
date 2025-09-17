@@ -46,7 +46,7 @@ const Page = async () => {
 							</Link>
 						)}
 					</div>
-					<div className="mt-12 rounded-2xl border border-white/10 bg-white/5 px-4 py-3">
+			<div className="mt-12 rounded-2xl border border-white/10 bg-white/5 px-2 sm:px-4 py-3">
 						<p className="sr-only">Trusted by candidates from these companies</p>
 						<div className="grid grid-cols-3 sm:grid-cols-6 gap-6 items-center justify-items-center">
 							<Image src="/covers/amazon.png" alt="Amazon" width={128} height={32} className="h-6 sm:h-7 md:h-8 w-auto drop-shadow" />
@@ -95,8 +95,8 @@ const Page = async () => {
 							</div>
 							<div className="text-xs text-light-100 opacity-70">readonly</div>
 						</div>
-						<pre className="px-4 py-5 text-sm overflow-x-auto">
-							<code>{`Q: Tell me about a challenging problem you solved.
+						<pre className="px-3 sm:px-4 py-5 text-xs sm:text-sm leading-relaxed text-left whitespace-pre-wrap break-words sm:whitespace-pre overflow-x-auto">
+							<code className="block max-w-full">{`Q: Tell me about a challenging problem you solved.
 A: I framed the problem, explored trade-offs, and shipped an iterative solution.
 
 Feedback

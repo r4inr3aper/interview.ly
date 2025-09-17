@@ -44,7 +44,7 @@ const DashboardPage = async () => {
 	return (
 		<>
 			<section className="card-cta">
-				<div className="flex flex-col gap-3 max-w-xl">
+				<div className="flex flex-col gap-3 max-w-xl max-sm:text-center">
 					<h2>Kick off your next mock interview</h2>
 					<p className="text-light-100">Choose your role and start practicing with instant feedback.</p>
 				</div>
